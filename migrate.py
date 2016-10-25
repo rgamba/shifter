@@ -3,8 +3,9 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import os
 import sys
 import click
+import time
 
-from db import connect, session, get_current_schema, create_demo_keyspace
+from db import connect, session, get_current_schema, create_demo_keyspace, delete_demo_keyspace
 from config import get_config
 
 
@@ -44,7 +45,8 @@ def get_migrations_on_file():
     except Exception:
         click.secho('Unable to open the migrations directory!', fg='red')
         sys.exit()
-    return files.sort()
+    files.sort()
+    return files
 
 
 def get_pending_migrations(last_migration, migrations):
@@ -83,14 +85,56 @@ def apply_migration(file, up, keyspace):
     session.set_keyspace(keyspace)
     qry = qryup if up else qrydown
     try:
-        session.execute(qry)
+        for q in qry.replace('\n', '').split(';'):
+            session.execute(q)
     except Exception:
         click.secho('ERROR', fg='red', bold=True)
         return False
     click.secho('OK', fg='green', bold=True)
 
 
-current = get_current_schema(config)
-create_demo_keyspace(str(current), "test")
+def create_migration_file(name, up, down=None, title='', description=''):
+    if not os.path.isdir('migrations'):
+        os.mkdir('migrations')
+    migrations = get_migrations_on_file()
+    i = 1
+    while True:
+        file_name = [str(len(migrations) + i).zfill(5)]
+        file_name.append(name.strip().lower().replace(' ', '_'))
+        file_name = '_'.join(file_name) + '.cql'
+        if os.path.isfile('migrations/' + file_name):
+            i++1
+            continue
+        file = open('migrations/' + file_name, 'w')
+        file.write('/*\n')
+        if title:
+            file.write(title)
+        else:
+            file.write(name)
+        file.write('\n\n')
+        if description:
+            file.write(description + '\n')
+        file.write('Created: ' + time.strftime("%d-%m-%Y") + '\n')
+        file.write('*/\n')
+        file.write('--UP--\n')
+        file.write(up + '\n\n')
+        if down:
+            file.write('--DOWN--\n')
+            file.write(down)
+        return file_name
+
+
+def create_init_migration(config):
+    click.echo("Creating initial migration... ", nl=False)
+    current = get_current_schema(config)
+    new_file = create_migration_file(name='initial', title='Initial migration', up=current)
+    click.secho('OK', fg='green', bold=True)
+    return new_file
+
+
+create_init_migration(config)
+#current = get_current_schema(config)
+#create_demo_keyspace(str(current), config['keyspace'])
+#delete_demo_keyspace()
 
 

@@ -33,11 +33,25 @@ def get_current_schema(config):
 
 
 def create_demo_keyspace(schema, schema_name):
-    schema = schema.replace("CREATE KEYSPACE {}".format(schema), "CREATE KEYSPACE {}".format(DEMO_KEYSPACE), 1)
+    schema = schema.replace("CREATE KEYSPACE {}".format(schema_name), "CREATE KEYSPACE {}".format(DEMO_KEYSPACE), 1)
+    schema = schema.replace("{}.".format(schema_name), "{}.".format(DEMO_KEYSPACE))
     try:
         click.echo("Creating tmp keyspace... ", nl=False)
-        session.execute("DROP KEYSPACE {} IF EXISTS".format(DEMO_KEYSPACE))
-        session.execute(schema)
+        session.execute("DROP KEYSPACE IF EXISTS {}".format(DEMO_KEYSPACE))
+        for q in schema.replace('\n', '').split(';'):
+            if q.strip() == "":
+                continue
+            session.execute(q)
     except Exception as e:
         click.secho("ERROR", fg='red', bold=True)
         sys.exit()
+    click.secho("OK", fg='green', bold=True)
+
+
+def delete_demo_keyspace():
+    try:
+        click.echo("Deleting tmp keyspace... ", nl=False)
+        session.execute("DROP KEYSPACE IF EXISTS {}".format(DEMO_KEYSPACE))
+        click.secho("OK", fg='green', bold=True)
+    except Exception:
+        click.secho("ERROR", fg='red', bold=True)
