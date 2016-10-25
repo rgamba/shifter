@@ -3,15 +3,16 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import os
 import sys
 import click
-from .db import connect, session
-from .config import get_config
 
+from db import connect, session, get_current_schema, create_demo_keyspace
+from config import get_config
 
-# Connection to Cassandra
-connect()
 
 # Get configuration
 config = get_config()
+
+# Connection to Cassandra
+connect(config)
 
 
 def get_last_migration():
@@ -87,4 +88,9 @@ def apply_migration(file, up, keyspace):
         click.secho('ERROR', fg='red', bold=True)
         return False
     click.secho('OK', fg='green', bold=True)
+
+
+current = get_current_schema(config)
+create_demo_keyspace(str(current), "test")
+
 

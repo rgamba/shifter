@@ -29,7 +29,7 @@ def get_config():
         config['keyspace'] = os.environ['CASSANDRA_KEYSPACE']
     else:
         if hasattr(settings, 'CASSANDRA_KEYSPACE'):
-            config['keyspace'] = settings.CASSANDRA_SEEDS
+            config['keyspace'] = settings.CASSANDRA_KEYSPACE
         else:
             click.secho('settings.CASSANDRA_KEYSPACE is missing!', fg='red')
             sys.exit()

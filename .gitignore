@@ -1,3 +1,4 @@
 env/*
 **/*.pyc
 migrations/*
+settingstest.py
