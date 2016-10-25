@@ -24,6 +24,8 @@ def get_last_migration(config):
         if not migrations:
             return None
         last_migration = migrations[0].migration
+        if last_migration.endswith('.cql'):
+            last_migration = last_migration[:-4]
     except Exception as e:
         click.echo("cm_migrations table not found, creating... ", nl=False)
         db.session.execute(
@@ -168,8 +170,13 @@ def create(name, title, description):
 
 
 @cli.command('migrate', short_help='Migrate the current database')
-def migrate():
+@click.argument('direction', required=False)
+def migrate(direction):
     global config
+    up = True
+    if direction == 'down':
+        up = False
+
     connect(config)
     schema = get_current_schema(config)
     last = get_last_migration(config)
@@ -184,7 +191,7 @@ def migrate():
     error = False
     db.create_demo_keyspace(schema, config['keyspace'])
     for f in pending:
-        res, err = apply_migration(file=f, up=True, keyspace=db.DEMO_KEYSPACE)
+        res, err = apply_migration(file=f, up=up, keyspace=db.DEMO_KEYSPACE)
         if not res:
             error = True
             click.secho('---\nUnable to continue due to an error in {}:\n\n{}\n---\n'.format(f, err.message), fg='red')
