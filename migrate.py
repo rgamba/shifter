@@ -6,6 +6,7 @@ import click
 import time
 
 from db import connect, session, get_current_schema, create_demo_keyspace, delete_demo_keyspace
+import db
 from config import get_config
 
 
@@ -16,25 +17,30 @@ config = get_config()
 connect(config)
 
 
-def get_last_migration():
+def get_last_migration(config):
     """ Get the last migration stored on cassandra. """
-    migrations = session.execute("SELECT migration FROM cm_migrations ORDER BY id DESC LIMIT 1")
-    if migrations is None:
+    db.session.set_keyspace(config['keyspace'])
+    try:
+        migrations = db.session.execute("SELECT migration FROM cm_migrations LIMIT 1")
+        if not migrations:
+            return None
+        last_migration = migrations[0].migration
+    except Exception as e:
         click.echo("cm_migrations table not found, creating... ", nl=False)
-        session.execute(
+        db.session.execute(
             """
             CREATE TABLE cm_migrations(
-                id timeuuid PRIMARY KEY,
+                id uuid,
+                time timeuuid,
                 migration text,
-                hash text
+                hash text,
+                PRIMARY KEY (id, time)
             )
-            WITH CLUSTERING ORDER BY(id DESC)
+            WITH CLUSTERING ORDER BY(time DESC)
             """
         )
         click.secho('OK', fg='green', bold=True)
         last_migration = None
-    else:
-        last_migration = migrations[0].migration
     return last_migration
 
 
@@ -51,9 +57,11 @@ def get_migrations_on_file():
 
 def get_pending_migrations(last_migration, migrations):
     """ Return a list of migration files that should be applied. """
-    if last_migration not in migrations:
+    if last_migration not in migrations and last_migration is not None:
         click.secho('Unable to migrate because migrations DB is ahead of migrations on file.', fg='red')
         sys.exit()
+    if last_migration is None:
+        last_migration = 0
     pending = []
     for m in migrations:
         try:
@@ -82,15 +90,16 @@ def apply_migration(file, up, keyspace):
         qryup = parts[0]
         qrydown = None
 
-    session.set_keyspace(keyspace)
+    db.session.set_keyspace(keyspace)
     qry = qryup if up else qrydown
     try:
         for q in qry.replace('\n', '').split(';'):
-            session.execute(q)
-    except Exception:
+            db.session.execute(q)
+    except Exception as e:
         click.secho('ERROR', fg='red', bold=True)
-        return False
+        return (False, e)
     click.secho('OK', fg='green', bold=True)
+    return (True, nil)
 
 
 def create_migration_file(name, up, down=None, title='', description=''):
@@ -132,9 +141,22 @@ def create_init_migration(config):
     return new_file
 
 
-create_init_migration(config)
-#current = get_current_schema(config)
-#create_demo_keyspace(str(current), config['keyspace'])
-#delete_demo_keyspace()
+def migrate(config):
+    schema = get_current_schema(config)
+    last = get_last_migration(config)
+    migrations = get_migrations_on_file()
+    pending = get_pending_migrations(last, migrations)
+    # First in demo
+    db.create_demo_keyspace(schema, config['keyspace'])
+    for f in pending:
+        res, err = apply_migration(file=f, up=True, keyspace=db.DEMO_KEYSPACE)
+        if not res:
+            click.secho('Unable to continue due to a migration error:', fg='red')
+            click.echo(err.message)
+            break
+    db.delete_demo_keyspace()
+
+
+migrate(config)
 
 
