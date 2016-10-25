@@ -4,17 +4,17 @@ import os
 import sys
 import click
 import time
-import uuid
-import time
 import warnings
-warnings.filterwarnings("ignore")
-from db import connect, session, get_current_schema, create_demo_keyspace, delete_demo_keyspace
+
+from db import connect, get_current_schema
 import db
 from config import get_config
 
+warnings.filterwarnings("ignore")
 
 # Get configuration
 config = get_config()
+
 
 def get_last_migration(config):
     """ Get the last migration stored on cassandra. """
@@ -99,12 +99,14 @@ def apply_migration(file, up, keyspace):
     qry = qryup if up else qrydown
     try:
         for q in qry.replace('\n', '').split(';'):
-            db.session.execute(q.strip())
+            q = q.strip()
+            if q != '':
+                db.session.execute(q.strip())
     except Exception as e:
         click.secho('ERROR', fg='red', bold=True)
         return (False, e)
     click.secho('OK', fg='green', bold=True)
-    return (True, nil)
+    return (True, None)
 
 
 def create_migration_file(name, up, down=None, title='', description=''):
@@ -147,26 +149,6 @@ def create_init_migration(config):
     return new_file
 
 
-def migrate(config):
-    schema = get_current_schema(config)
-    last = get_last_migration(config)
-    migrations = get_migrations_on_file()
-    if len(migrations) <= 0:
-        create_init_migration(config)
-    pending = get_pending_migrations(last, migrations)
-    if len(pending) <= 0:
-        click.echo("Already up to date.")
-        return
-    # First in demo
-    db.create_demo_keyspace(schema, config['keyspace'])
-    for f in pending:
-        res, err = apply_migration(file=f, up=True, keyspace=db.DEMO_KEYSPACE)
-        if not res:
-            click.secho('---\nUnable to continue due to an error in {}:\n\n{}\n---\n'.format(f, err.message), fg='red')
-            break
-    db.delete_demo_keyspace()
-
-
 # Cmd commands
 
 @click.group()
@@ -184,6 +166,43 @@ def create(name, title, description):
     click.echo('Create migration file ', nl=False)
     click.secho(file, bold=True, fg='green')
 
+
+@cli.command('migrate', short_help='Migrate the current database')
+def migrate():
+    global config
+    connect(config)
+    schema = get_current_schema(config)
+    last = get_last_migration(config)
+    migrations = get_migrations_on_file()
+    if len(migrations) <= 0:
+        create_init_migration(config)
+    pending = get_pending_migrations(last, migrations)
+    if len(pending) <= 0:
+        click.echo("Already up to date.")
+        return
+    # First in demo
+    error = False
+    db.create_demo_keyspace(schema, config['keyspace'])
+    for f in pending:
+        res, err = apply_migration(file=f, up=True, keyspace=db.DEMO_KEYSPACE)
+        if not res:
+            error = True
+            click.secho('---\nUnable to continue due to an error in {}:\n\n{}\n---\n'.format(f, err.message), fg='red')
+            break
+    db.delete_demo_keyspace()
+    if error:
+        return
+    # Now in real keyspace
+    for f in pending:
+        res, err = apply_migration(file=f, up=True, keyspace=config['keyspace'])
+        if not res:
+            error = True
+            click.secho('---\nUnable to continue due to an error in {}:\n\n{}\n---\n'.format(f, err.message), fg='red')
+            break
+        db.record_migration(name=f, schema=get_current_schema(config))
+    if error:
+        return
+    click.echo("Migration completed successfully.")
 
 
 if __name__ == "__main__":

@@ -62,6 +62,8 @@ def delete_demo_keyspace():
 
 
 def record_migration(name, schema):
+    if name.endswith('.cql'):
+        name = name[:-4]
     m = hashlib.md5()
     m.update(schema)
     session.execute(

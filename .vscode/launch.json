@@ -13,6 +13,9 @@
                 "WaitOnAbnormalExit",
                 "WaitOnNormalExit"
             ],
+            "args": [
+                "migrate"
+            ],
             "env": {
                 "CASSANDRA_SETTINGS": "settingstest"
             }
