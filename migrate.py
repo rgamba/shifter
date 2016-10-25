@@ -4,7 +4,10 @@ import os
 import sys
 import click
 import time
-
+import uuid
+import time
+import warnings
+warnings.filterwarnings("ignore")
 from db import connect, session, get_current_schema, create_demo_keyspace, delete_demo_keyspace
 import db
 from config import get_config
@@ -12,10 +15,6 @@ from config import get_config
 
 # Get configuration
 config = get_config()
-
-# Connection to Cassandra
-connect(config)
-
 
 def get_last_migration(config):
     """ Get the last migration stored on cassandra. """
@@ -47,7 +46,10 @@ def get_last_migration(config):
 def get_migrations_on_file():
     """ Get the stored migrations on file. """
     try:
-        files = os.listdir('migrations')
+        files = []
+        for f in os.listdir('migrations'):
+            if f[-3:] == 'cql':
+                files.append(f)
     except Exception:
         click.secho('Unable to open the migrations directory!', fg='red')
         sys.exit()
@@ -57,11 +59,13 @@ def get_migrations_on_file():
 
 def get_pending_migrations(last_migration, migrations):
     """ Return a list of migration files that should be applied. """
-    if last_migration not in migrations and last_migration is not None:
+    if last_migration is not None and (last_migration + '.cql') not in migrations:
         click.secho('Unable to migrate because migrations DB is ahead of migrations on file.', fg='red')
         sys.exit()
     if last_migration is None:
         last_migration = 0
+    else:
+        last_migration = last_migration.split('_')[0]
     pending = []
     for m in migrations:
         try:
@@ -83,6 +87,7 @@ def apply_migration(file, up, keyspace):
         file.close()
     except Exception:
         click.secho('ERROR (unable to upen file)', fg='red', bold=True)
+    content = content.replace('--UP--', '', 1)
     parts = content.split('--DOWN--')
     if len(parts) > 1:
         qryup, qrydown = parts
@@ -94,7 +99,7 @@ def apply_migration(file, up, keyspace):
     qry = qryup if up else qrydown
     try:
         for q in qry.replace('\n', '').split(';'):
-            db.session.execute(q)
+            db.session.execute(q.strip())
     except Exception as e:
         click.secho('ERROR', fg='red', bold=True)
         return (False, e)
@@ -138,6 +143,7 @@ def create_init_migration(config):
     current = get_current_schema(config)
     new_file = create_migration_file(name='initial', title='Initial migration', up=current)
     click.secho('OK', fg='green', bold=True)
+    db.record_migration(name=new_file.replace('.cql', ''), schema=current)
     return new_file
 
 
@@ -145,18 +151,41 @@ def migrate(config):
     schema = get_current_schema(config)
     last = get_last_migration(config)
     migrations = get_migrations_on_file()
+    if len(migrations) <= 0:
+        create_init_migration(config)
     pending = get_pending_migrations(last, migrations)
+    if len(pending) <= 0:
+        click.echo("Already up to date.")
+        return
     # First in demo
     db.create_demo_keyspace(schema, config['keyspace'])
     for f in pending:
         res, err = apply_migration(file=f, up=True, keyspace=db.DEMO_KEYSPACE)
         if not res:
-            click.secho('Unable to continue due to a migration error:', fg='red')
-            click.echo(err.message)
+            click.secho('---\nUnable to continue due to an error in {}:\n\n{}\n---\n'.format(f, err.message), fg='red')
             break
     db.delete_demo_keyspace()
 
 
-migrate(config)
+# Cmd commands
 
+@click.group()
+def cli():
+    pass
+
+
+@cli.command('create', short_help='Create a new migration file')
+@click.argument('name', required=True)
+@click.option('--title', help='Migration title', default=None)
+@click.option('--description', help='Migration description', default=None)
+def create(name, title, description):
+    connect(config)
+    file = create_migration_file(name=name, up='/* YOUR CQL GOES HERE */', title=title, description=description)
+    click.echo('Create migration file ', nl=False)
+    click.secho(file, bold=True, fg='green')
+
+
+
+if __name__ == "__main__":
+    cli()
 

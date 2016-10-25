@@ -4,6 +4,10 @@ import click
 import sys
 from cassandra.cluster import Cluster
 from invoke import run
+import uuid
+from cassandra.util import uuid_from_time
+import time
+import hashlib
 
 DEMO_KEYSPACE = 'cm_tmp'
 
@@ -55,3 +59,15 @@ def delete_demo_keyspace():
         click.secho("OK", fg='green', bold=True)
     except Exception:
         click.secho("ERROR", fg='red', bold=True)
+
+
+def record_migration(name, schema):
+    m = hashlib.md5()
+    m.update(schema)
+    session.execute(
+        """
+        INSERT INTO cm_migrations(id, time, migration, hash)
+        VALUES (%s, %s, %s, %s)
+        """,
+        (uuid.uuid1(), uuid_from_time(time.time()), name, m.hexdigest())
+    )
