@@ -171,6 +171,7 @@ def create(name, title, description):
 
 @cli.command('migrate', short_help='Migrate the current database')
 @click.argument('direction', required=False)
+@click.argument('head', required=False)
 def migrate(direction):
     global config
     up = True
