@@ -206,7 +206,7 @@ def cli():
     pass
 
 
-@cli.command('create', short_help='Create a new migration file')
+@cli.command('create', short_help='Create a new migration file.')
 @click.argument('name', required=True)
 @click.option('--title', help='Migration title', default=None)
 @click.option('--description', help='Migration description', default=None)
@@ -217,7 +217,7 @@ def create(name, title, description):
     click.secho(file, bold=True, fg='green')
 
 
-@cli.command('init', short_help='Migrate the current database')
+@cli.command('init', short_help='Create the migration genesis based on the current keyspace.')
 def init():
     global config
     # Cassandra connection.
@@ -225,7 +225,7 @@ def init():
     create_init_migration(config)
 
 
-@cli.command('migrate', short_help='Migrate the current database')
+@cli.command('migrate', short_help='Migrate the current database.')
 @click.argument('head', required=False)
 @click.option('--simulate', is_flag=True, help='Just print the migrations that will be performed')
 @click.option('--just-demo', is_flag=True, help='Just perform the migrations in demo DB')
