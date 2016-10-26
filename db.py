@@ -4,8 +4,7 @@ import click
 import sys
 from cassandra.cluster import Cluster
 from invoke import run
-import uuid
-from cassandra.util import uuid_from_time
+from cassandra.util import max_uuid_from_time
 import time
 import hashlib
 
@@ -46,7 +45,7 @@ def create_demo_keyspace(schema, schema_name):
             if q.strip() == "":
                 continue
             session.execute(q)
-    except Exception as e:
+    except Exception:
         click.secho("ERROR", fg='red', bold=True)
         sys.exit()
     click.secho("OK", fg='green', bold=True)
@@ -61,15 +60,64 @@ def delete_demo_keyspace():
         click.secho("ERROR", fg='red', bold=True)
 
 
-def record_migration(name, schema):
+def record_migration(name, schema, up=True):
     if name.endswith('.cql'):
         name = name[:-4]
+    if not up:
+        # Delete
+        rows = session.execute(
+            """
+            SELECT time FROM cm_migrations 
+            WHERE type = 'MIGRATION' 
+                AND migration = '00004_add_user_meta' 
+            ALLOW FILTERING
+            """
+        )
+        if not rows:
+            return False
+        id = rows[0].time
+        session.execute("DELETE FROM cm_migrations WHERE type = 'MIGRATION' AND time = %s", (id,))
+        return
     m = hashlib.md5()
     m.update(schema)
     session.execute(
         """
-        INSERT INTO cm_migrations(id, time, migration, hash)
+        INSERT INTO cm_migrations(type, time, migration, hash)
         VALUES (%s, %s, %s, %s)
         """,
-        (uuid.uuid1(), uuid_from_time(time.time()), name, m.hexdigest())
+        ('MIGRATION', max_uuid_from_time(time.time()), name, m.hexdigest())
     )
+
+
+def create_migration_table(keyspace):
+    session.set_keyspace(keyspace)
+    click.echo("Creating cm_migrations table... ", nl=False)
+    try:
+        session.execute(
+            """
+            CREATE TABLE IF NOT EXISTS cm_migrations(
+                type text,
+                time timeuuid,
+                migration text,
+                hash text,
+                PRIMARY KEY (type, time)
+            )
+            WITH CLUSTERING ORDER BY(time DESC)
+            """
+        )
+        click.secho('OK', fg='green', bold=True)
+        return (True, None)
+    except Exception as e:
+        click.secho('ERROR', fg='red', bold=True)
+        return (False, e)
+
+
+def keyspace_exists(name):
+    session.set_keyspace('system_schema')
+    ks = session.execute('SELECT keyspace_name FROM keyspaces')
+    if not ks:
+        return False
+    for row in ks:
+        if row.keyspace_name == name:
+            return True
+    return False

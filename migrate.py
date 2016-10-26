@@ -17,30 +17,20 @@ config = get_config()
 
 
 def get_last_migration(config):
-    """ Get the last migration stored on cassandra. """
+    """
+    Get the last migration stored on cassandra.
+    If there is no first migration, it will return 0
+    If there is no table cm_migrations, it will return None
+    """
     db.session.set_keyspace(config['keyspace'])
     try:
         migrations = db.session.execute("SELECT migration FROM cm_migrations LIMIT 1")
         if not migrations:
-            return None
+            return 0
         last_migration = migrations[0].migration
         if last_migration.endswith('.cql'):
             last_migration = last_migration[:-4]
     except Exception as e:
-        click.echo("cm_migrations table not found, creating... ", nl=False)
-        db.session.execute(
-            """
-            CREATE TABLE cm_migrations(
-                id uuid,
-                time timeuuid,
-                migration text,
-                hash text,
-                PRIMARY KEY (id, time)
-            )
-            WITH CLUSTERING ORDER BY(time DESC)
-            """
-        )
-        click.secho('OK', fg='green', bold=True)
         last_migration = None
     return last_migration
 
@@ -85,10 +75,10 @@ def get_pending_migrations(last_migration, migrations, head=None):
     In case DOWN migrations are not found in the file, the migration wont be able to continue.
     Pending migrations will be returned IN ORDER in which they must be executed.
     """
-    if last_migration is not None and (last_migration + '.cql') not in migrations:
+    if last_migration and '{}.cql'.format(last_migration) not in migrations:
         click.secho('Unable to migrate because migrations DB is ahead of migrations on file.', fg='red')
         sys.exit()
-    if last_migration is None:
+    if not last_migration:
         last_migration = 0
     else:
         last_migration = last_migration.split('_')[0]
@@ -111,6 +101,8 @@ def get_pending_migrations(last_migration, migrations, head=None):
     for m in migrations:
         try:
             f = m.split('_')[0]
+            if f == '00000':
+                continue
             cur_mig = int(f)
         except Exception:
             continue
@@ -133,7 +125,8 @@ def apply_migration(file, up, keyspace):
         content = file.read()
         file.close()
     except Exception:
-        click.secho('ERROR (unable to upen file)', fg='red', bold=True)
+        click.secho('ERROR', fg='red', bold=True)
+        return (False, 'Unable to open file {}.'.format(file))
     content = content.replace('--UP--', '', 1)
     parts = content.split('--DOWN--')
     if len(parts) > 1:
@@ -142,7 +135,12 @@ def apply_migration(file, up, keyspace):
         qryup = parts[0]
         qrydown = None
 
-    db.session.set_keyspace(keyspace)
+    if not qrydown:
+        click.secho('ERROR', fg='red', bold=True)
+        return (False, 'File {} does not include a --DOWN-- statement.')
+
+    if keyspace is not None:
+        db.session.set_keyspace(keyspace)
     qry = qryup if up else qrydown
     try:
         for q in qry.replace('\n', '').split(';'):
@@ -156,14 +154,16 @@ def apply_migration(file, up, keyspace):
     return (True, None)
 
 
-def create_migration_file(name, up, down=None, title='', description=''):
+def create_migration_file(name, up, down=None, title='', description='', genesis=False):
     if not os.path.isdir('migrations'):
         os.mkdir('migrations')
     migrations = get_migrations_on_file()
     i = 1
     while True:
-        file_name = [str(len(migrations) + i).zfill(5)]
-        file_name.append(name.strip().lower().replace(' ', '_'))
+        count = len(migrations) if not genesis else -1
+        file_name = [str(count + i).zfill(5)]
+        if not genesis:
+            file_name.append(name.strip().lower().replace(' ', '_'))
         file_name = '_'.join(file_name) + '.cql'
         if os.path.isfile('migrations/' + file_name):
             i += 1
@@ -188,11 +188,14 @@ def create_migration_file(name, up, down=None, title='', description=''):
 
 
 def create_init_migration(config):
-    click.echo("Creating initial migration... ", nl=False)
+    click.echo("Creating migration genesis... ", nl=False)
+    if os.path.isfile('migrations/00000.cql'):
+        click.secho('ERROR (already exists)', fg='red', bold=True)
+        return False
     current = get_current_schema(config)
-    new_file = create_migration_file(name='initial', title='Initial migration', up=current)
+    down = 'DROP KEYSPACE {};'.format(config.get('keyspace'))
+    new_file = create_migration_file(name='', title='MIGRATION GENESIS', up=current, down=down, genesis=True)
     click.secho('OK', fg='green', bold=True)
-    db.record_migration(name=new_file.replace('.cql', ''), schema=current)
     return new_file
 
 
@@ -214,19 +217,54 @@ def create(name, title, description):
     click.secho(file, bold=True, fg='green')
 
 
+@cli.command('init', short_help='Migrate the current database')
+def init():
+    global config
+    # Cassandra connection.
+    connect(config)
+    create_init_migration(config)
+
+
 @cli.command('migrate', short_help='Migrate the current database')
 @click.argument('head', required=False)
 @click.option('--simulate', is_flag=True, help='Just print the migrations that will be performed')
-def migrate(head, simulate):
+@click.option('--just-demo', is_flag=True, help='Just perform the migrations in demo DB')
+def migrate(head, simulate, just_demo):
     global config
+    # Input validation.
     try:
         head = int(head) if head else None
     except Exception:
         click.secho('Head argument must be an integer.', fg='red')
+        return
+    # Cassandra connection.
     connect(config)
+    # Check migrations on file.
+    migrations = get_migrations_on_file()
+    # Check if there is the migration genesis is present
+    # if it's not present we cannot continue.
+    if '00000.cql' not in migrations:
+        click.secho('Migration genesis (00000.cql) is missing! Forgot to run init command first?', fg='red')
+        return
+    # Check if the keyspace exists and if we have a migrations
+    # table configured.
+    if not db.keyspace_exists(config.get('keyspace')):
+        # Keyspace does not exist, we need to create it based on the genesis file.
+        click.echo('Keyspace not found, creating from the genesis file.')
+        result, err = apply_migration('00000.cql', True, None)
+        if not result:
+            click.secho('---\nUnable to continue due to an error genesis migration:\n\n{}\n---\n'.format(err.message), fg='red')
+            return
+        result, err = db.create_migration_table(config.get('keyspace'))
+        if not result:
+            click.secho('---\nUnable to continue due to an error:\n\n{}\n---\n'.format(err.message), fg='red')
+            return
+        # Override head, it needs to go all the way from the bottom...
+        head = None
+
     schema = get_current_schema(config)
     last = get_last_migration(config)
-    migrations = get_migrations_on_file()
+
     if len(migrations) <= 0:
         create_init_migration(config)
     pending, up = get_pending_migrations(last, migrations, head)
@@ -251,14 +289,16 @@ def migrate(head, simulate):
     db.delete_demo_keyspace()
     if error:
         return
+    if just_demo:
+        return
     # Now in real keyspace
     for f in pending:
-        res, err = apply_migration(file=f, up=True, keyspace=config['keyspace'])
+        res, err = apply_migration(file=f, up=up, keyspace=config['keyspace'])
         if not res:
             error = True
             click.secho('---\nUnable to continue due to an error in {}:\n\n{}\n---\n'.format(f, err.message), fg='red')
             break
-        db.record_migration(name=f, schema=get_current_schema(config))
+        db.record_migration(name=f, schema=get_current_schema(config), up=up)
     if error:
         return
     click.echo("Migration completed successfully.")

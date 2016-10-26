@@ -15,8 +15,8 @@
             ],
             "args": [
                 "migrate",
-                "4",
-                "--simulate"
+                "2",
+                ""
             ],
             "env": {
                 "CASSANDRA_SETTINGS": "settingstest"
