@@ -59,8 +59,32 @@ def get_migrations_on_file():
     return files
 
 
-def get_pending_migrations(last_migration, migrations):
-    """ Return a list of migration files that should be applied. """
+def get_head_migration_on_file(migrations):
+    """ Get the highest migration on file. """
+    mig = []
+    for m in migrations:
+        try:
+            m = m.split('_')[0]
+            m = int(m)
+        except Exception:
+            continue
+        mig.append(m)
+    if not mig:
+        return 0
+    return mig.pop()
+
+
+def get_pending_migrations(last_migration, migrations, head=None):
+    """
+    Return a list of migration files that should be applied. 
+
+    If head is not None, it must be a positive integer pointing at the tarjet migration we
+    are headed. If the current DB migration is ahead of the head, then the delta migrations
+    will be applied DOWN. Otherwise the delta migrations will be applied UP.
+
+    In case DOWN migrations are not found in the file, the migration wont be able to continue.
+    Pending migrations will be returned IN ORDER in which they must be executed.
+    """
     if last_migration is not None and (last_migration + '.cql') not in migrations:
         click.secho('Unable to migrate because migrations DB is ahead of migrations on file.', fg='red')
         sys.exit()
@@ -68,17 +92,38 @@ def get_pending_migrations(last_migration, migrations):
         last_migration = 0
     else:
         last_migration = last_migration.split('_')[0]
+
+    pointer = int(last_migration)
+    files_head = get_head_migration_on_file(migrations)
+    # If no head is specified, then the target head will be the
+    # largest migration on file.
+    target = files_head if head is None else int(head)
+    if target > files_head:
+        click.secho('The target migration provided does not exist in the migrations dir.', fg='red')
+        sys.exit()
+    # Are we migrating up or down?
+    up = True if pointer <= target else False
+
+    if not up:
+        migrations.sort(reverse=True)
+
     pending = []
     for m in migrations:
         try:
             f = m.split('_')[0]
-            mint = int(f)
+            cur_mig = int(f)
         except Exception:
             continue
-        if mint <= int(last_migration):
-            continue
+
+        if up:
+            if cur_mig <= pointer or cur_mig > target:
+                continue
+        else:
+            if cur_mig <= target or cur_mig > pointer:
+                continue
+
         pending.append(m)
-    return pending
+    return (pending, up)
 
 
 def apply_migration(file, up, keyspace):
@@ -121,7 +166,7 @@ def create_migration_file(name, up, down=None, title='', description=''):
         file_name.append(name.strip().lower().replace(' ', '_'))
         file_name = '_'.join(file_name) + '.cql'
         if os.path.isfile('migrations/' + file_name):
-            i++1
+            i += 1
             continue
         file = open('migrations/' + file_name, 'w')
         file.write('/*\n')
@@ -170,24 +215,30 @@ def create(name, title, description):
 
 
 @cli.command('migrate', short_help='Migrate the current database')
-@click.argument('direction', required=False)
 @click.argument('head', required=False)
-def migrate(direction):
+@click.option('--simulate', is_flag=True, help='Just print the migrations that will be performed')
+def migrate(head, simulate):
     global config
-    up = True
-    if direction == 'down':
-        up = False
-
+    try:
+        head = int(head) if head else None
+    except Exception:
+        click.secho('Head argument must be an integer.', fg='red')
     connect(config)
     schema = get_current_schema(config)
     last = get_last_migration(config)
     migrations = get_migrations_on_file()
     if len(migrations) <= 0:
         create_init_migration(config)
-    pending = get_pending_migrations(last, migrations)
+    pending, up = get_pending_migrations(last, migrations, head)
     if len(pending) <= 0:
         click.echo("Already up to date.")
         return
+
+    if simulate:
+        for p in pending:
+            click.echo('{} will be applied {}'.format(p, 'UP' if up else 'DOWN'))
+        return
+
     # First in demo
     error = False
     db.create_demo_keyspace(schema, config['keyspace'])

@@ -14,7 +14,9 @@
                 "WaitOnNormalExit"
             ],
             "args": [
-                "migrate"
+                "migrate",
+                "4",
+                "--simulate"
             ],
             "env": {
                 "CASSANDRA_SETTINGS": "settingstest"
