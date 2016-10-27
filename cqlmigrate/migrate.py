@@ -6,9 +6,9 @@ import click
 import time
 import warnings
 
-from db import connect, get_current_schema
-import db
-from config import get_config
+from .db import connect, get_current_schema, get_session, create_demo_keyspace, keyspace_exists
+from .db import record_migration, delete_demo_keyspace, create_migration_table, DEMO_KEYSPACE
+from .config import get_config
 
 warnings.filterwarnings("ignore")
 
@@ -22,9 +22,9 @@ def get_last_migration(config):
     If there is no first migration, it will return 0
     If there is no table cm_migrations, it will return None
     """
-    db.session.set_keyspace(config['keyspace'])
+    get_session().set_keyspace(config['keyspace'])
     try:
-        migrations = db.session.execute("SELECT migration FROM cm_migrations LIMIT 1")
+        migrations = get_session().execute("SELECT migration FROM cm_migrations LIMIT 1")
         if not migrations:
             return 0
         last_migration = migrations[0].migration
@@ -66,7 +66,7 @@ def get_head_migration_on_file(migrations):
 
 def get_pending_migrations(last_migration, migrations, head=None):
     """
-    Return a list of migration files that should be applied. 
+    Return a list of migration files that should be applied.
 
     If head is not None, it must be a positive integer pointing at the tarjet migration we
     are headed. If the current DB migration is ahead of the head, then the delta migrations
@@ -140,13 +140,13 @@ def apply_migration(file, up, keyspace):
         return (False, 'File {} does not include a --DOWN-- statement.')
 
     if keyspace is not None:
-        db.session.set_keyspace(keyspace)
+        get_session().set_keyspace(keyspace)
     qry = qryup if up else qrydown
     try:
         for q in qry.replace('\n', '').split(';'):
             q = q.strip()
             if q != '':
-                db.session.execute(q.strip())
+                get_session().execute(q.strip())
     except Exception as e:
         click.secho('ERROR', fg='red', bold=True)
         return (False, e)
@@ -272,14 +272,14 @@ def migrate(head, simulate, just_demo):
         return
     # Check if the keyspace exists and if we have a migrations
     # table configured.
-    if not db.keyspace_exists(config.get('keyspace')):
+    if not keyspace_exists(config.get('keyspace')):
         # Keyspace does not exist, we need to create it based on the genesis file.
         click.echo('Keyspace not found, creating from the genesis file.')
         result, err = apply_migration('00000.cql', True, None)
         if not result:
             click.secho('---\nUnable to continue due to an error genesis migration:\n\n{}\n---\n'.format(err.message), fg='red')
             return
-        result, err = db.create_migration_table(config.get('keyspace'))
+        result, err = create_migration_table(config.get('keyspace'))
         if not result:
             click.secho('---\nUnable to continue due to an error:\n\n{}\n---\n'.format(err.message), fg='red')
             return
@@ -303,14 +303,14 @@ def migrate(head, simulate, just_demo):
 
     # First in demo
     error = False
-    db.create_demo_keyspace(schema, config['keyspace'])
+    create_demo_keyspace(schema, config['keyspace'])
     for f in pending:
-        res, err = apply_migration(file=f, up=up, keyspace=db.DEMO_KEYSPACE)
+        res, err = apply_migration(file=f, up=up, keyspace=DEMO_KEYSPACE)
         if not res:
             error = True
             click.secho('---\nUnable to continue due to an error in {}:\n\n{}\n---\n'.format(f, err.message), fg='red')
             break
-    db.delete_demo_keyspace()
+    delete_demo_keyspace()
     if error:
         return
     if just_demo:
@@ -322,7 +322,7 @@ def migrate(head, simulate, just_demo):
             error = True
             click.secho('---\nUnable to continue due to an error in {}:\n\n{}\n---\n'.format(f, err.message), fg='red')
             break
-        db.record_migration(name=f, schema=get_current_schema(config), up=up)
+        record_migration(name=f, schema=get_current_schema(config), up=up)
     if error:
         return
     click.echo("Migration completed successfully.")

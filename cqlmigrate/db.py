@@ -26,6 +26,13 @@ def connect(config):
     return session
 
 
+def get_session():
+    global session
+    if session is None:
+        connect()
+    return session
+
+
 def get_current_schema(config):
     try:
         out = run('cqlsh -e "DESCRIBE {c[keyspace]}" {c[seeds][0]}'.format(c=config), hide='stdout')

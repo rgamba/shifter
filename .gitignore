@@ -2,3 +2,6 @@ env/*
 **/*.pyc
 migrations/*
 settingstest.py
+build/
+*.egg-info
+dist/

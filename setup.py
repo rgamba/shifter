@@ -2,9 +2,19 @@ from setuptools import setup
 
 setup(
     name='cql-migrate',
-    version='1.0',
+    description='A tool for migration management with Cassandra',
+    author='Ricardo Gamba',
+    author_email='rgamba@gmail.com',
+    license='MIT',
+    classifiers=[
+        'Programming Language :: Python :: 2.7',
+    ],
+    version='0.1',
     py_modules=['cql-migrate'],
     include_package_data=True,
+    packages=[
+        'cqlmigrate'
+    ],
     install_requires=[
         'click',
         'cassandra-driver',
@@ -14,6 +24,6 @@ setup(
     ],
     entry_points='''
         [console_scripts]
-        cql-migrate=migrate:cli
+        cqlmigrate=cqlmigrate.migrate:cli
     ''',
 )
