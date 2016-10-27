@@ -33,9 +33,30 @@ def get_session():
     return session
 
 
+def run_cqlsh(config, command, keyspace=None):
+    q = ['cqlsh', '-e', '"{}"'.format(command)]
+    if 'user' in config:
+        q.append('-u')
+        q.append(config.get('user'))
+    if 'password' in config:
+        q.append('-p')
+        q.append(config.get('password'))
+    if keyspace:
+        q.append('-k')
+        q.append(keyspace)
+    if 'cqlversion' in config:
+        q.append('--cqlversion={}'.format(config.get('cqlversion')))
+    q.append(config['seeds'][0])
+    if 'port' in config:
+        q.append(config['port'])
+    return ' '.join(q)
+
+
 def get_current_schema(config):
     try:
-        out = run('cqlsh -e "DESCRIBE {c[keyspace]}" {c[seeds][0]}'.format(c=config), hide='stdout')
+        cqlsh = run_cqlsh(config, command="DESCRIBE " + config['keyspace'])
+        print(cqlsh)
+        out = run(cqlsh, hide='stdout')
     except Exception as e:
         click.secho("Unable to get the current DB schema: {}".format(e), fg='red')
         sys.exit()

@@ -26,7 +26,7 @@ setup(
         'cassandra-driver>=3.7.0',
         'futures>=3.0.5',
         'invoke>=0.13.0',
-        'six>=1.0.0',
+        'six>=1.10.0'
         'cqlsh'
     ],
     entry_points={

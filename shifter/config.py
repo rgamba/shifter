@@ -5,8 +5,20 @@ import sys
 import click
 import importlib
 
+REQUIRED = [
+    'CASSANDRA_SEEDS',
+    'CASSANDRA_KEYSPACE'
+]
+OPTIONAL = [
+    'CASSANDRA_PORT',
+    'CASSANDRA_USER',
+    'CASSANDRA_PASSWORD',
+    'CASSANDRA_CQLVERSION'
+]
+
 
 def get_config(env_override=None):
+    """ Get the configuration dict. """
     env = os.environ
     if env_override is not None:
         for key, value in env_override.iteritems():
@@ -22,20 +34,15 @@ def get_config(env_override=None):
 
     # Check configuration
     config = {}
-    if 'CASSANDRA_SEEDS' in env:
-        config['seeds'] = env['CASSANDRA_SEEDS']
-    else:
-        if hasattr(settings, 'CASSANDRA_SEEDS'):
-            config['seeds'] = settings.CASSANDRA_SEEDS
+
+    for c in REQUIRED:
+        if hasattr(settings, c):
+            config[c.lower().split('_', 1).pop()] = getattr(settings, c)
         else:
-            click.secho('CASSANDRA_SEEDS is missing is settings file!', fg='red')
+            click.secho('{} is missing is settings file!'.format(c), fg='red')
             sys.exit()
-    if 'CASSANDRA_KEYSPACE' in env:
-        config['keyspace'] = env['CASSANDRA_KEYSPACE']
-    else:
-        if hasattr(settings, 'CASSANDRA_KEYSPACE'):
-            config['keyspace'] = settings.CASSANDRA_KEYSPACE
-        else:
-            click.secho('settings.CASSANDRA_KEYSPACE is missing!', fg='red')
-            sys.exit()
+    for c in OPTIONAL:
+        if hasattr(settings, c):
+            config[c.lower().split('_', 1).pop()] = getattr(settings, c)
+
     return config

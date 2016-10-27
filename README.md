@@ -7,7 +7,8 @@ shifter is based on the idea of simple pure CQL migration files than have a very
 ## Instalation
 
 ```bash
-git clone https://github.com/rgamba/shifter && python setup.py install
+git clone https://github.com/rgamba/shifter && cd shifter
+pip install -e .
 ```
 
 ## Getting started
