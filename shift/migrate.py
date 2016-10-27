@@ -20,11 +20,11 @@ def get_last_migration(config):
     """
     Get the last migration stored on cassandra.
     If there is no first migration, it will return 0
-    If there is no table cm_migrations, it will return None
+    If there is no table shift_migrations, it will return None
     """
     get_session().set_keyspace(config['keyspace'])
     try:
-        migrations = get_session().execute("SELECT migration FROM cm_migrations LIMIT 1")
+        migrations = get_session().execute("SELECT migration FROM shift_migrations LIMIT 1")
         if not migrations:
             return 0
         last_migration = migrations[0].migration
@@ -119,6 +119,18 @@ def get_pending_migrations(last_migration, migrations, head=None):
 
 
 def apply_migration(file, up, keyspace):
+    """
+    Apply the migration given the raw file name.
+    If up is True, then it will execute the up statement, else it will execute the down statement.
+    Valid CQL format in files is as follows:
+
+    --UP--
+    /* Your CQL statements here, separated by ; */
+    --DOWN--
+    /* Your CQL statements here. They MUST revert what the UP statements do */
+
+    """
+    fname = file
     click.echo("Applying migration {} {} ".format(file, ('UP' if up else 'DOWN')), nl=False)
     try:
         file = open('migrations/{}'.format(file), 'r')
@@ -137,7 +149,7 @@ def apply_migration(file, up, keyspace):
 
     if not qrydown:
         click.secho('ERROR', fg='red', bold=True)
-        return (False, 'File {} does not include a --DOWN-- statement.')
+        return (False, 'File {} does not include a --DOWN-- statement.'.format(fname))
 
     if keyspace is not None:
         get_session().set_keyspace(keyspace)
@@ -154,7 +166,12 @@ def apply_migration(file, up, keyspace):
     return (True, None)
 
 
-def create_migration_file(name, up, down=None, title='', description='', genesis=False):
+def create_migration_file(name, up, down=None, title='', description='',
+                          genesis=False):
+    """
+    Create a migration file in the migrations folder
+    and return its filename.
+    """
     if not os.path.isdir('migrations'):
         os.mkdir('migrations')
     migrations = get_migrations_on_file()
@@ -188,6 +205,11 @@ def create_migration_file(name, up, down=None, title='', description='', genesis
 
 
 def create_init_migration(config):
+    """
+    Create the genesis configuration file and return it's filename.
+    This function will also write the current keyspace schema (the one
+    defined in the current settings) as the content of the file.
+    """
     click.echo("Creating migration genesis... ", nl=False)
     if os.path.isfile('migrations/00000.cql'):
         click.secho('ERROR (already exists)', fg='red', bold=True)
@@ -211,14 +233,16 @@ def cli():
 @click.option('--title', help='Migration title', default=None)
 @click.option('--description', help='Migration description', default=None)
 def create(name, title, description):
-    connect(config)
-    file = create_migration_file(name=name, up='/* YOUR CQL GOES HERE */', title=title, description=description)
+    """ Create a new migration file. """
+    file = create_migration_file(name=name, up='/* YOUR CQL GOES HERE */', 
+                                 title=title, description=description)
     click.echo('Create migration file ', nl=False)
     click.secho(file, bold=True, fg='green')
 
 
 @cli.command('init', short_help='Create the migration genesis based on the current keyspace.')
 def init():
+    """ Initiate the migration project in the current directory. """
     global config
     # Cassandra connection.
     connect(config)
@@ -226,8 +250,12 @@ def init():
 
 
 @cli.command('status', short_help='Show the current migration status.')
-def status():
+@click.option('--settings', default=None, help='Settings module (not file). Must contain CASSANDRA_SEEDS and CASSANDRA_KEYSPACE defined')
+def status(settings):
+    """ Get the current migration status. """
     global config
+    if settings is not None:
+        config = get_config({'CASSANDRA_SETTINGS': settings})
     # Cassandra connection.
     connect(config)
     # Check migrations on file.
@@ -238,23 +266,30 @@ def status():
     if '00000.cql' not in migrations:
         click.secho('There is no genesis migration found.')
         return
+    if not keyspace_exists(config.get('keyspace')):
+        click.echo('Shift hasn\'t been initialized on this keyspace.\nRun \'shift migrate\' to initiate or user the --help flag.')
+        return
     last = get_last_migration(config)
     if last is None:
-        click.secho('cql-migrate hasn\'t been initialized.')
+        click.secho('Shift hasn\'t been initialized in this keyspace.')
         return
     pending, up = get_pending_migrations(last, migrations)
     if len(pending) <= 0:
-        click.echo("Already up to date.")
+        click.echo("Already up to date.\nCurrent head is {}".format(last))
         return
-    click.echo("Cassandra is {} movements behind the current file head ({}).".format(len(pending), migrations[-1]))
+    click.echo("Cassandra is {} movements behind the current file head ({}).\nCurrent Cassandra head is {}".format(len(pending), migrations[-1], last))
 
 
 @cli.command('migrate', short_help='Migrate the current database.')
 @click.argument('head', required=False)
 @click.option('--simulate', is_flag=True, help='Just print the migrations that will be performed')
 @click.option('--just-demo', is_flag=True, help='Just perform the migrations in demo DB')
-def migrate(head, simulate, just_demo):
+@click.option('--settings', default=None, help='Settings module (not file). Must contain CASSANDRA_SEEDS and CASSANDRA_KEYSPACE defined')
+def migrate(head, simulate, just_demo, settings):
+    """ Migrate now. """
     global config
+    if settings is not None:
+        config = get_config({'CASSANDRA_SETTINGS': settings})
     # Input validation.
     try:
         head = int(head) if head else None
@@ -279,15 +314,16 @@ def migrate(head, simulate, just_demo):
         if not result:
             click.secho('---\nUnable to continue due to an error genesis migration:\n\n{}\n---\n'.format(err.message), fg='red')
             return
-        result, err = create_migration_table(config.get('keyspace'))
-        if not result:
-            click.secho('---\nUnable to continue due to an error:\n\n{}\n---\n'.format(err.message), fg='red')
-            return
         # Override head, it needs to go all the way from the bottom...
         head = None
 
     schema = get_current_schema(config)
     last = get_last_migration(config)
+    if last is None:
+        result, err = create_migration_table(config.get('keyspace'))
+        if not result:
+            click.secho('---\nUnable to continue due to an error:\n\n{}\n---\n'.format(err.message), fg='red')
+            return
 
     if len(migrations) <= 0:
         create_init_migration(config)
@@ -308,7 +344,7 @@ def migrate(head, simulate, just_demo):
         res, err = apply_migration(file=f, up=up, keyspace=DEMO_KEYSPACE)
         if not res:
             error = True
-            click.secho('---\nUnable to continue due to an error in {}:\n\n{}\n---\n'.format(f, err.message), fg='red')
+            click.secho('---\nUnable to continue due to an error in {}:\n\n{}\n---\n'.format(f, err), fg='red')
             break
     delete_demo_keyspace()
     if error:

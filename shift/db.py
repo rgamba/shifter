@@ -9,6 +9,7 @@ import time
 import hashlib
 
 DEMO_KEYSPACE = 'cm_tmp'
+SHIFT_TABLE = 'shift_migrations'
 
 session = None
 
@@ -19,7 +20,6 @@ def connect(config):
     cluster = Cluster(config['seeds'])
     try:
         session = cluster.connect()
-        click.echo("Connected to Cassandra, keyspace {}".format(config['keyspace']))
     except:
         click.secho("Unable to connect to Cassandra", fg='red')
         sys.exit()
@@ -74,7 +74,7 @@ def record_migration(name, schema, up=True):
         # Delete
         rows = session.execute(
             """
-            SELECT time FROM cm_migrations 
+            SELECT time FROM shift_migrations 
             WHERE type = 'MIGRATION' 
                 AND migration = %s 
             ALLOW FILTERING
@@ -84,14 +84,14 @@ def record_migration(name, schema, up=True):
             click.secho("Unable to select last migration from DB", fg="red")
             return False
         id = rows[0].time
-        delete = session.execute("DELETE FROM cm_migrations WHERE type = 'MIGRATION' AND time = %s", (id,))
+        delete = session.execute("DELETE FROM shift_migrations WHERE type = 'MIGRATION' AND time = %s", (id,))
         return
 
     m = hashlib.md5()
     m.update(schema)
     session.execute(
         """
-        INSERT INTO cm_migrations(type, time, migration, hash)
+        INSERT INTO shift_migrations(type, time, migration, hash)
         VALUES (%s, %s, %s, %s)
         """,
         ('MIGRATION', max_uuid_from_time(time.time()), name, m.hexdigest())
@@ -100,11 +100,11 @@ def record_migration(name, schema, up=True):
 
 def create_migration_table(keyspace):
     session.set_keyspace(keyspace)
-    click.echo("Creating cm_migrations table... ", nl=False)
+    click.echo("Creating shift_migrations table... ", nl=False)
     try:
         session.execute(
             """
-            CREATE TABLE IF NOT EXISTS cm_migrations(
+            CREATE TABLE IF NOT EXISTS shift_migrations(
                 type text,
                 time timeuuid,
                 migration text,
