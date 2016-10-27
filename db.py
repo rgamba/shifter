@@ -69,15 +69,17 @@ def record_migration(name, schema, up=True):
             """
             SELECT time FROM cm_migrations 
             WHERE type = 'MIGRATION' 
-                AND migration = '00004_add_user_meta' 
+                AND migration = %s 
             ALLOW FILTERING
-            """
+            """, (name,)
         )
         if not rows:
+            click.secho("Unable to select last migration from DB", fg="red")
             return False
         id = rows[0].time
-        session.execute("DELETE FROM cm_migrations WHERE type = 'MIGRATION' AND time = %s", (id,))
+        delete = session.execute("DELETE FROM cm_migrations WHERE type = 'MIGRATION' AND time = %s", (id,))
         return
+
     m = hashlib.md5()
     m.update(schema)
     session.execute(

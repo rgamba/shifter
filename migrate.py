@@ -225,6 +225,30 @@ def init():
     create_init_migration(config)
 
 
+@cli.command('status', short_help='Show the current migration status.')
+def status():
+    global config
+    # Cassandra connection.
+    connect(config)
+    # Check migrations on file.
+    migrations = get_migrations_on_file()
+    if not migrations:
+        click.secho('No migrations found on the current directory.')
+        return
+    if '00000.cql' not in migrations:
+        click.secho('There is no genesis migration found.')
+        return
+    last = get_last_migration(config)
+    if last is None:
+        click.secho('cql-migrate hasn\'t been initialized.')
+        return
+    pending, up = get_pending_migrations(last, migrations)
+    if len(pending) <= 0:
+        click.echo("Already up to date.")
+        return
+    click.echo("Cassandra is {} movements behind the current file head ({}).".format(len(pending), migrations[-1]))
+
+
 @cli.command('migrate', short_help='Migrate the current database.')
 @click.argument('head', required=False)
 @click.option('--simulate', is_flag=True, help='Just print the migrations that will be performed')
