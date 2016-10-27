@@ -55,7 +55,6 @@ def run_cqlsh(config, command, keyspace=None):
 def get_current_schema(config):
     try:
         cqlsh = run_cqlsh(config, command="DESCRIBE " + config['keyspace'])
-        print(cqlsh)
         out = run(cqlsh, hide='stdout')
     except Exception as e:
         click.secho("Unable to get the current DB schema: {}".format(e), fg='red')
