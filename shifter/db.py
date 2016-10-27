@@ -160,3 +160,87 @@ def keyspace_exists(name):
         if row.keyspace_name == name:
             return True
     return False
+
+
+def get_keyspace_tables(keyspace):
+    session.set_keyspace('system_schema')
+    ks = session.execute('SELECT table_name FROM tables WHERE keyspace_name = %s', [keyspace])
+    if not ks:
+        return []
+    tables = []
+    for row in ks:
+        tables.append(row.table_name)
+    return tables
+
+
+def get_table_columns(keyspace, table):
+    """ Return a list of tuples (col_name, col_type). """
+    session.set_keyspace('system_schema')
+    ks = session.execute('SELECT * FROM columns WHERE keyspace_name = %s AND table_name = %s', [keyspace, table])
+    if not ks:
+        return []
+    cols = []
+    for row in ks:
+        cols.append({
+            'name': row.column_name,
+            'type': row.type,
+            'kind': row.kind,
+            'order': row.clustering_order,
+            'position': row.position
+        })
+    return cols
+
+
+class Column(object):
+    def __init__(self, name, type, kind='regular', order=None, position=-1):
+        self.name = name
+        self.type = type
+        self.kind = kind
+        self.order = order
+        self.position = position
+
+    def is_pk(self):
+        return self.kind == 'partition_key'
+
+    def is_clustering(self):
+        return self.kind == 'clustering'
+
+    def dump_cql(self):
+        return '{} {}'.format(self.type, self.name)
+
+
+class Table(object):
+    def __init__(self, name, columns=[]):
+        self.name = name
+        self.columns = columns
+
+    def primary_keys(self):
+        pk = {}
+        for c in self.columns:
+            if c.is_pk():
+                pk[c.position] = c.name
+        r = []
+        for i in sorted(pk):
+            r.append(pk[i])
+        return r
+
+    def clustering_columns(self):
+        cl = {}
+        for c in self.columns:
+            if c.is_clustering():
+                cl[c.position] = c.name
+        r = []
+        for i in sorted(cl):
+            r.append(cl[i])
+        return r
+
+    def dump_cql(self):
+        cql = ['CREATE TABLE {} ('.format(self.name)]
+        cql.append('\t' + ',\n'.join([x.dump_cql() for x in self.columns]))
+        pk = self.primary_keys()
+        pks = ('({})' if len(pk) > 1 else '{}').format(', '.join(pk))
+        cc = self.clustering_columns()
+        clustering = ',' + ', '.join(cc) if cc else ''
+        cql.append('\tPRIMARY KEY ({}{})'.format(pks, clustering))
+        cql.append(')')
+        return '\n'.join(cql)
