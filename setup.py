@@ -17,7 +17,7 @@ setup(
         'Programming Language :: Python :: 2.7',
     ],
     version='0.1',
-    py_modules=['cql-migrate'],
+    py_modules=['shift'],
     include_package_data=True,
     packages=[
         'shift'
