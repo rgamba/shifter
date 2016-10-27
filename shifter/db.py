@@ -1,12 +1,15 @@
 # -*- coding: utf-8 -*-
 from __future__ import absolute_import, division, print_function, unicode_literals
-import click
 import sys
-from cassandra.cluster import Cluster
-from invoke import run
-from cassandra.util import max_uuid_from_time
 import time
 import hashlib
+
+import click
+from invoke import run
+from cassandra.cluster import Cluster
+from cassandra.util import max_uuid_from_time
+from cassandra.auth import PlainTextAuthProvider
+
 
 DEMO_KEYSPACE = 'cm_tmp'
 SHIFT_TABLE = 'shift_migrations'
@@ -17,7 +20,14 @@ session = None
 def connect(config):
     global session
     # Connect to cassandra
-    cluster = Cluster(config['seeds'])
+    auth_provider = None
+    if config.get('user'):
+        auth_provider = PlainTextAuthProvider(username=config.get('user'), password=config.get('password'))
+    cluster = Cluster(
+        contact_points=config.get('seeds'),
+        port=(int(config.get('port')) if config.get('port') else 9042),
+        auth_provider=auth_provider
+    )
     try:
         session = cluster.connect()
     except:
@@ -35,19 +45,19 @@ def get_session():
 
 def run_cqlsh(config, command, keyspace=None):
     q = ['cqlsh', '-e', '"{}"'.format(command)]
-    if 'user' in config:
+    if config.get('user'):
         q.append('-u')
         q.append(config.get('user'))
-    if 'password' in config:
+    if config.get('password'):
         q.append('-p')
         q.append(config.get('password'))
     if keyspace:
         q.append('-k')
         q.append(keyspace)
-    if 'cqlversion' in config:
+    if config.get('cqlversion'):
         q.append('--cqlversion={}'.format(config.get('cqlversion')))
     q.append(config['seeds'][0])
-    if 'port' in config:
+    if config.get('port'):
         q.append(config['port'])
     return ' '.join(q)
 

@@ -29,7 +29,7 @@ def get_config(env_override=None):
         if 'CASSANDRA_SETTINGS' in os.environ:
             settings = importlib.import_module(env['CASSANDRA_SETTINGS'])
     except Exception:
-        click.secho('Unable to load settings module!', fg='red')
+        click.secho('Unable to load settings module {}!'.format(env.get('CASSANDRA_SETTINGS')), fg='red')
         sys.exit()
 
     # Check configuration
