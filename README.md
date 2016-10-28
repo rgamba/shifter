@@ -7,7 +7,7 @@ shifter is based on the idea of simple pure CQL migration files than have a very
 ## Instalation
 
 ```bash
-pip install cql-shifter
+$ pip install cql-shifter
 ```
 
 ## Getting started
@@ -52,7 +52,10 @@ If you already have migrations folder and migration files inside `migrations/` t
 
 1. `cd` into your workspace root (the directory that contains the `migrations/` folder).
 2. Make sure to update the settings of the `CASSANDRA_SETTINGS` file to match your desired cassandra installation.
-3. Run `shifter migrate`
+3. Run
+```bash
+$ shifter migrate
+```
 4. All done. Start working!
 
 ### Creating your first database migration
