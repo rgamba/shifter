@@ -17,7 +17,7 @@ warnings.filterwarnings("ignore")
 config = get_config()
 
 
-def get_last_migration(config, get_schema=False):
+def get_last_migration(config):
     """
     Get the last migration stored on cassandra.
     If there is no first migration, it will return 0
@@ -28,7 +28,7 @@ def get_last_migration(config, get_schema=False):
         migrations = get_session().execute("SELECT migration, snapshot FROM shift_migrations LIMIT 1")
         if not migrations:
             return 0
-        last_migration = migrations[0].migration if not get_schema else migrations[0].snapshot
+        last_migration = migrations[0].migration
         if last_migration.endswith('.cql'):
             last_migration = last_migration[:-4]
     except Exception as e:
@@ -294,7 +294,7 @@ def auto_update(print, name):
     if not keyspace_exists(config.get('keyspace')):
         click.echo('Shift hasn\'t been initialized on this keyspace.\nRun \'shift migrate\' to initiate or user the --help flag.')
         return
-    last = get_last_migration(config, get_schema=True)
+    last = get_last_migration(config)
     if last is None:
         click.secho('Shift hasn\'t been initialized in this keyspace.')
         return
@@ -309,6 +309,10 @@ def auto_update(print, name):
         return
     create_demo_keyspace(snap, config.get('keyspace'))
     actions_up = auto_migrate_keyspace(DEMO_KEYSPACE, config.get('keyspace'))
+    if len(actions_up) <= 0:
+        click.secho('Cassandra is up to date with migrations on file.')
+        delete_demo_keyspace()
+        return
     actions_down = auto_migrate_keyspace(config.get('keyspace'), DEMO_KEYSPACE)
     delete_demo_keyspace()
     upquery = ';\n'.join(actions_up) + ";"
