@@ -20,7 +20,7 @@ def get_last_migration(config):
     """
     get_session().set_keyspace(config['keyspace'])
     try:
-        migrations = get_session().execute("SELECT migration, snapshot FROM shift_migrations LIMIT 1")
+        migrations = get_session().execute("SELECT migration FROM shift_migrations LIMIT 1")
         if not migrations:
             return 0
         last_migration = migrations[0].migration
