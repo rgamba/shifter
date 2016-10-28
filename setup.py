@@ -31,7 +31,7 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'shifter = shifter.migrate:cli',
+            'shifter = shifter.cli:cli',
         ],
     },
 )
