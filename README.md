@@ -72,7 +72,7 @@ This is the preferred method as it is more reliable.
 That's it. Now run `shifter status` and you will see it tells you that your migrations folder is 1 movement ahead of your Cassandra database. This means you need to run a migration.
 To complete the migration run `shifter migrate`. 
 
->>> **In case you have a syntax error or any of the queries conflict with the schema, the migration will not modify your keyspace in any way.**
+> **In case you have a syntax error or any of the queries conflict with the schema, the migration will not modify your keyspace in any way.**
 This is because shifter creates a keyspace replica at runtime and runs all the migrations in that replica before running it on the real keyspace.
 If there was any error in the migration, then the migration will be aborted and the replica will always be deleted.
 
@@ -86,5 +86,5 @@ That's it! Now run `shifter status` and you should see you are up to date!
 
 > TIP: If you just want to output the changes that you made against the current keyspace, run `shifter auto-update --print --name sync`. 
 
->>> Important: Auto-update doesn't track column renaming or any changes in the status of a partition key or a clustering key as it would effectively destroy data.
+> Important: Auto-update doesn't track column renaming or any changes in the status of a partition key or a clustering key as it would effectively destroy data.
 Changes of that nature will need to be tracked manually, that's why it is very importat you check manually every auto-update generated migrations.
