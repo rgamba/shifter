@@ -26,7 +26,8 @@ def cli():
 @click.option('--description', help='Migration description', default=None)
 def create(name, title, description):
     """ Create a new migration file. """
-    file = create_migration_file(name=name, up='/* YOUR CQL GOES HERE */', 
+    file = create_migration_file(name=name, up='/* YOUR CQL GOES HERE */',
+                                 down='/* CQL TO REVERSE THE QUERIES ABOVE */',
                                  title=title, description=description)
     click.echo('Created migration file ', nl=False)
     click.secho(file, bold=True, fg='green')
