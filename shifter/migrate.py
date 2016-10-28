@@ -8,6 +8,7 @@ import warnings
 
 from .db import connect, get_current_schema, get_session, create_demo_keyspace, keyspace_exists
 from .db import record_migration, delete_demo_keyspace, create_migration_table, DEMO_KEYSPACE
+from .db import auto_migrate_keyspace, get_snapshot, update_snapshot
 from .config import get_config
 
 warnings.filterwarnings("ignore")
@@ -16,7 +17,7 @@ warnings.filterwarnings("ignore")
 config = get_config()
 
 
-def get_last_migration(config):
+def get_last_migration(config, get_schema=False):
     """
     Get the last migration stored on cassandra.
     If there is no first migration, it will return 0
@@ -24,10 +25,10 @@ def get_last_migration(config):
     """
     get_session().set_keyspace(config['keyspace'])
     try:
-        migrations = get_session().execute("SELECT migration FROM shift_migrations LIMIT 1")
+        migrations = get_session().execute("SELECT migration, snapshot FROM shift_migrations LIMIT 1")
         if not migrations:
             return 0
-        last_migration = migrations[0].migration
+        last_migration = migrations[0].migration if not get_schema else migrations[0].snapshot
         if last_migration.endswith('.cql'):
             last_migration = last_migration[:-4]
     except Exception as e:
@@ -218,6 +219,7 @@ def create_init_migration(config):
     down = 'DROP KEYSPACE {};'.format(config.get('keyspace'))
     new_file = create_migration_file(name='', title='MIGRATION GENESIS', up=current, down=down, genesis=True)
     click.secho('OK', fg='green', bold=True)
+    update_snapshot(current)
     return new_file
 
 
@@ -280,6 +282,35 @@ def status(settings):
     click.echo("Cassandra is {} movements behind the current file head ({}).\nCurrent Cassandra head is {}".format(len(pending), migrations[-1], last))
 
 
+@cli.command('auto-update', short_help='Auto generate the next migration targeting the current Cassandra structure.')
+def auto_update():
+    global config
+    # Cassandra connection.
+    connect(config)
+    # Check migrations on file.
+    migrations = get_migrations_on_file()
+    if not keyspace_exists(config.get('keyspace')):
+        click.echo('Shift hasn\'t been initialized on this keyspace.\nRun \'shift migrate\' to initiate or user the --help flag.')
+        return
+    last = get_last_migration(config, get_schema=True)
+    if last is None:
+        click.secho('Shift hasn\'t been initialized in this keyspace.')
+        return
+    pending, up = get_pending_migrations(last, migrations)
+    if len(pending) > 0:
+        click.secho('There are pending migrations to be done, please migrate before auto-updating.')
+        return
+    # Create demo keyspace to compare
+    snap = get_snapshot()
+    if not snap:
+        click.secho('Unable to locate the last snapshot.', fg='red')
+        return
+    create_demo_keyspace(snap, config.get('keyspace'))
+    actions = auto_migrate_keyspace(DEMO_KEYSPACE, config.get('keyspace'))
+    click.echo(';\n'.join(actions))
+    delete_demo_keyspace()
+
+
 @cli.command('migrate', short_help='Migrate the current database.')
 @click.argument('head', required=False)
 @click.option('--simulate', is_flag=True, help='Just print the migrations that will be performed')
@@ -324,6 +355,7 @@ def migrate(head, simulate, just_demo, settings):
         if not result:
             click.secho('---\nUnable to continue due to an error:\n\n{}\n---\n'.format(err.message), fg='red')
             return
+        update_snapshot(get_current_schema(config))
 
     if len(migrations) <= 0:
         create_init_migration(config)

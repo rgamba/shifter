@@ -44,6 +44,25 @@ def get_session():
     return session
 
 
+def get_snapshot():
+    try:
+        file = open('migrations/.snapshot', 'r')
+        content = file.read()
+        file.close()
+    except Exception:
+        return None
+    return content
+
+
+def update_snapshot(schema):
+    try:
+        file = open('migrations/.snapshot', 'w+')
+        file.write(schema)
+        file.close()
+    except Exception:
+        pass
+
+
 def run_cqlsh(config, command, keyspace=None):
     q = ['cqlsh', '-e', '"{}"'.format(command)]
     if config.get('user'):
@@ -83,8 +102,8 @@ def create_demo_keyspace(schema, schema_name):
             if q.strip() == "":
                 continue
             session.execute(q)
-    except Exception:
-        click.secho("ERROR", fg='red', bold=True)
+    except Exception as e:
+        click.secho("ERROR {}".format(e), fg='red', bold=True)
         sys.exit()
     click.secho("OK", fg='green', bold=True)
 
@@ -122,11 +141,12 @@ def record_migration(name, schema, up=True):
     m.update(schema)
     session.execute(
         """
-        INSERT INTO shift_migrations(type, time, migration, hash)
+        INSERT INTO shift_migrations(type, time, migration, hash, snapshot)
         VALUES (%s, %s, %s, %s)
         """,
-        ('MIGRATION', max_uuid_from_time(time.time()), name, m.hexdigest())
+        ('MIGRATION', max_uuid_from_time(time.time()), name, m.hexdigest(), schema)
     )
+    update_snapshot(schema)
 
 
 def create_migration_table(keyspace):
@@ -140,6 +160,7 @@ def create_migration_table(keyspace):
                 time timeuuid,
                 migration text,
                 hash text,
+                snapshot text,
                 PRIMARY KEY (type, time)
             )
             WITH CLUSTERING ORDER BY(time DESC)
@@ -163,6 +184,29 @@ def keyspace_exists(name):
     return False
 
 
+def auto_migrate_keyspace(source_name, target_name):
+    """
+    Compare the 2 keyspaces and return a list of
+    queries to be performed in order to sync source to target.
+    """
+    source = Keyspace(name=source_name, tables=[])
+    stables = get_keyspace_tables(source_name)
+    for table in stables:
+        source.tables.append(Table(
+            name=table,
+            columns=get_table_columns(source_name, table)
+        ))
+    target = Keyspace(name=target_name, tables=[])
+    ttables = get_keyspace_tables(target_name)
+    table = []
+    for table in ttables:
+        target.tables.append(Table(
+            name=table,
+            columns=get_table_columns(target_name, table)
+        ))
+    return get_keyspace_diff(source, target)
+
+
 def get_keyspace_tables(keyspace):
     session.set_keyspace('system_schema')
     ks = session.execute('SELECT table_name FROM tables WHERE keyspace_name = %s', [keyspace])
@@ -182,13 +226,12 @@ def get_table_columns(keyspace, table):
         return []
     cols = []
     for row in ks:
-        cols.append({
-            'name': row.column_name,
-            'type': row.type,
-            'kind': row.kind,
-            'order': row.clustering_order,
-            'position': row.position
-        })
+        cols.append(Column(
+            name=row.column_name,
+            type=row.type,
+            kind=row.kind,
+            order=row.clustering_order,
+            position=row.position))
     return cols
 
 
@@ -362,58 +405,3 @@ class Keyspace(object):
             if t.name == name:
                 return t
         return None
-
-
-table = Table(
-    name='table1',
-    columns=[
-        Column('user_id', 'UUID', 'partition_key'),
-        Column('name', 'TEXT'),
-        Column('type', 'TEXT', 'partition_key', position=0),
-        Column('date', 'TIMEUUID', 'clustering', position=1),
-        Column('geneder', 'TEXT', 'clustering', position=0)
-    ]
-)
-
-table1 = Table(
-    name='table1',
-    columns=[
-        Column('user_id', 'UUID', 'partition_key'),
-        Column('name', 'TEXT'),
-        Column('last_name', 'TEXT'),
-        Column('type', 'TEXT', 'partition_key', position=0),
-        Column('date', 'TIMEUUID', 'clustering', position=1),
-        Column('geneder', 'TEXT', 'clustering', position=0)
-    ]
-)
-
-table2 = Table(
-    name='table2',
-    columns=[
-        Column('user_id', 'UUID', 'partition_key'),
-        Column('name_old', 'TEXT'),
-        Column('type', 'TEXT', 'partition_key', position=0),
-        Column('date', 'TIMEUUID', 'clustering', position=1),
-        Column('geneder', 'TEXT', 'clustering', position=0)
-    ]
-)
-
-table3 = Table(
-    name='table3',
-    columns=[
-        Column('user_id', 'UUID', 'partition_key'),
-        Column('name', 'TEXT'),
-        Column('last_name', 'TEXT'),
-        Column('type', 'TEXT', 'partition_key', position=0),
-        Column('date', 'TIMEUUID', 'clustering', position=1),
-        Column('geneder', 'TEXT', 'clustering', position=0)
-    ]
-)
-
-
-k1 = Keyspace(name='ks1', tables=[table, table2])
-k2 = Keyspace(name='ks2', tables=[table1, table2, table3])
-
-d = get_keyspace_diff(k1, k2)
-print(d)
-
