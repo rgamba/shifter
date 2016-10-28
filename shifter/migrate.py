@@ -238,7 +238,7 @@ def create(name, title, description):
     """ Create a new migration file. """
     file = create_migration_file(name=name, up='/* YOUR CQL GOES HERE */', 
                                  title=title, description=description)
-    click.echo('Create migration file ', nl=False)
+    click.echo('Created migration file ', nl=False)
     click.secho(file, bold=True, fg='green')
 
 
@@ -283,7 +283,9 @@ def status(settings):
 
 
 @cli.command('auto-update', short_help='Auto generate the next migration targeting the current Cassandra structure.')
-def auto_update():
+@click.option('--print', is_flag=True, help='Just print the migrations')
+@click.option('--name', required=True, help='Name of the update')
+def auto_update(print, name):
     global config
     # Cassandra connection.
     connect(config)
@@ -306,9 +308,18 @@ def auto_update():
         click.secho('Unable to locate the last snapshot.', fg='red')
         return
     create_demo_keyspace(snap, config.get('keyspace'))
-    actions = auto_migrate_keyspace(DEMO_KEYSPACE, config.get('keyspace'))
-    click.echo(';\n'.join(actions))
+    actions_up = auto_migrate_keyspace(DEMO_KEYSPACE, config.get('keyspace'))
+    actions_down = auto_migrate_keyspace(config.get('keyspace'), DEMO_KEYSPACE)
     delete_demo_keyspace()
+    upquery = ';\n'.join(actions_up) + ";"
+    downquery = ';\n'.join(actions_down)  + ";"
+    if print:
+        click.echo('---\n' + upquery + '\n---\n')
+        return
+    file = create_migration_file(name, upquery, downquery)
+    click.echo('Created migration file ', nl=False)
+    record_migration(file, get_current_schema(config), config)
+    click.secho(file, bold=True, fg='green')
 
 
 @cli.command('migrate', short_help='Migrate the current database.')
@@ -390,7 +401,7 @@ def migrate(head, simulate, just_demo, settings):
             error = True
             click.secho('---\nUnable to continue due to an error in {}:\n\n{}\n---\n'.format(f, err.message), fg='red')
             break
-        record_migration(name=f, schema=get_current_schema(config), up=up)
+        record_migration(name=f, schema=get_current_schema(config), up=up, config=config)
     if error:
         return
     click.echo("Migration completed successfully.")

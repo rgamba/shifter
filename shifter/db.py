@@ -117,7 +117,8 @@ def delete_demo_keyspace():
         click.secho("ERROR", fg='red', bold=True)
 
 
-def record_migration(name, schema, up=True):
+def record_migration(name, schema, config, up=True):
+    session.set_keyspace(config['keyspace'])
     if name.endswith('.cql'):
         name = name[:-4]
     if not up:
@@ -141,10 +142,10 @@ def record_migration(name, schema, up=True):
     m.update(schema)
     session.execute(
         """
-        INSERT INTO shift_migrations(type, time, migration, hash, snapshot)
+        INSERT INTO shift_migrations(type, time, migration, hash)
         VALUES (%s, %s, %s, %s)
         """,
-        ('MIGRATION', max_uuid_from_time(time.time()), name, m.hexdigest(), schema)
+        ('MIGRATION', max_uuid_from_time(time.time()), name, m.hexdigest())
     )
     update_snapshot(schema)
 
@@ -160,7 +161,6 @@ def create_migration_table(keyspace):
                 time timeuuid,
                 migration text,
                 hash text,
-                snapshot text,
                 PRIMARY KEY (type, time)
             )
             WITH CLUSTERING ORDER BY(time DESC)
@@ -357,7 +357,7 @@ class Table(object):
 
     def dump_cql(self):
         cql = ['CREATE TABLE {} ('.format(self.name)]
-        cql.append('\t' + ',\n\t'.join([x.dump_cql() for x in self.columns]))
+        cql.append('\t' + ',\n\t'.join([x.dump_cql() for x in self.columns]) + ",")
         pk = self.primary_keys()
         pks = ('({})' if len(pk) > 1 else '{}').format(', '.join(pk))
         cc = self.clustering_columns()
