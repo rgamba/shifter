@@ -192,6 +192,65 @@ def get_table_columns(keyspace, table):
     return cols
 
 
+def get_columns_diff(source, target):
+    if not isinstance(source, Column) or not isinstance(target, Column):
+        raise ValueError("parameters must be Column instances")
+    if source.kind != target.kind:
+        return "kind"
+    if source.position != target.position:
+        return "position"
+    if source.type != target.type:
+        return "type"
+    return None
+
+def get_tables_diff(source, target):
+    if not isinstance(source, Table) or not isinstance(target, Table):
+        raise ValueError("parameters must be Table instances")
+    if source == target:
+        return None
+    actions = []
+    # Compare table name
+    if source.name != target.name:
+        raise ValueError("tables does not share the same name")
+    # Columns in source table
+    for col in source.columns:
+        target_col = target.get_column(col.name)
+        if not target_col:
+            actions.append(source.drop_column_cql(col))
+        else:
+            if target_col != col:
+                dif = get_columns_diff(col, target_col)
+                if dif == "type":
+                    actions.append(source.alter_column_type_cql(col.name, target_col.type))
+    # Columns in destination table
+    for col in target.columns:
+        source_col = source.get_column(col.name)
+        if not source_col:
+            actions.append(source.add_column_cql(col))
+    return actions
+
+
+def get_keyspace_diff(source, target):
+    if not isinstance(source, Keyspace) or not isinstance(target, Keyspace):
+        raise ValueError("parameters must be Table instances")
+    actions = []
+    # Source tables
+    for table in source.tables:
+        target_table = target.get_table(table.name)
+        if not target_table:
+            actions.append(table.drop_cql())
+        else:
+            a = get_tables_diff(table, target_table)
+            if a:
+                actions += a
+    # Target tables
+    for table in target.tables:
+        source_table = source.get_table(table.name)
+        if not source_table:
+            actions.append(table.dump_cql())
+    return actions
+
+
 class Column(object):
     def __init__(self, name, type, kind='regular', order=None, position=-1):
         self.name = name
@@ -279,3 +338,82 @@ class Table(object):
 
     def __ne__(self, other):
         return not self.__eq__(other)
+
+    def drop_cql(self):
+        return 'DROP TABLE "{}"'.format(self.name)
+
+    def drop_column_cql(self, column):
+        return 'ALTER TABLE "{}" DROP "{}"'.format(self.name, column.name)
+
+    def add_column_cql(self, column):
+        return 'ALTER TABLE "{}" ADD "{}" {}'.format(self.name, column.name, column.type)
+
+    def alter_column_type_cql(self, name, type):
+        return 'ALTER TABLE "{}" ALTER "{}" TYPE {}'.format(self.name, name, type)
+
+
+class Keyspace(object):
+    def __init__(self, name, tables=[]):
+        self.name = name
+        self.tables = tables
+
+    def get_table(self, name):
+        for t in self.tables:
+            if t.name == name:
+                return t
+        return None
+
+
+table = Table(
+    name='table1',
+    columns=[
+        Column('user_id', 'UUID', 'partition_key'),
+        Column('name', 'TEXT'),
+        Column('type', 'TEXT', 'partition_key', position=0),
+        Column('date', 'TIMEUUID', 'clustering', position=1),
+        Column('geneder', 'TEXT', 'clustering', position=0)
+    ]
+)
+
+table1 = Table(
+    name='table1',
+    columns=[
+        Column('user_id', 'UUID', 'partition_key'),
+        Column('name', 'TEXT'),
+        Column('last_name', 'TEXT'),
+        Column('type', 'TEXT', 'partition_key', position=0),
+        Column('date', 'TIMEUUID', 'clustering', position=1),
+        Column('geneder', 'TEXT', 'clustering', position=0)
+    ]
+)
+
+table2 = Table(
+    name='table2',
+    columns=[
+        Column('user_id', 'UUID', 'partition_key'),
+        Column('name_old', 'TEXT'),
+        Column('type', 'TEXT', 'partition_key', position=0),
+        Column('date', 'TIMEUUID', 'clustering', position=1),
+        Column('geneder', 'TEXT', 'clustering', position=0)
+    ]
+)
+
+table3 = Table(
+    name='table3',
+    columns=[
+        Column('user_id', 'UUID', 'partition_key'),
+        Column('name', 'TEXT'),
+        Column('last_name', 'TEXT'),
+        Column('type', 'TEXT', 'partition_key', position=0),
+        Column('date', 'TIMEUUID', 'clustering', position=1),
+        Column('geneder', 'TEXT', 'clustering', position=0)
+    ]
+)
+
+
+k1 = Keyspace(name='ks1', tables=[table, table2])
+k2 = Keyspace(name='ks2', tables=[table1, table2, table3])
+
+d = get_keyspace_diff(k1, k2)
+print(d)
+
